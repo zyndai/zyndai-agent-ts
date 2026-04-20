@@ -5,20 +5,20 @@ import { generateKeypair, keypairFromPrivateBytes, verify } from "../src/identit
 describe("buildEndpoints", () => {
   it("builds correct paths from a base URL", () => {
     const ep = buildEndpoints("https://agent.example.com");
-    expect(ep.invoke).toBe("https://agent.example.com/invoke");
-    expect(ep.invoke_async).toBe("https://agent.example.com/invoke/async");
+    expect(ep.invoke).toBe("https://agent.example.com/webhook/sync");
+    expect(ep.invoke_async).toBe("https://agent.example.com/webhook");
     expect(ep.health).toBe("https://agent.example.com/health");
-    expect(ep.agent_card).toBe("https://agent.example.com/.well-known/agent-card.json");
+    expect(ep.agent_card).toBe("https://agent.example.com/.well-known/agent.json");
   });
 
   it("strips trailing slashes from base URL", () => {
     const ep = buildEndpoints("https://agent.example.com///");
-    expect(ep.invoke).toBe("https://agent.example.com/invoke");
+    expect(ep.invoke).toBe("https://agent.example.com/webhook/sync");
   });
 
   it("handles URL with a path prefix", () => {
     const ep = buildEndpoints("https://example.com/agents/foo");
-    expect(ep.invoke).toBe("https://example.com/agents/foo/invoke");
+    expect(ep.invoke).toBe("https://example.com/agents/foo/webhook/sync");
     expect(ep.health).toBe("https://example.com/agents/foo/health");
   });
 });
@@ -41,7 +41,7 @@ describe("buildEntityCard", () => {
     expect(card.public_key).toBe(kp.publicKeyString);
     expect(card.entity_url).toBe("https://agent.example.com");
     expect(card.version).toBe("2.0.0");
-    expect(card.status).toBe("active");
+    expect(card.status).toBe("online");
     expect(card.signature).toBeUndefined();
   });
 
@@ -99,9 +99,9 @@ describe("buildEntityCard", () => {
     });
 
     expect(card.pricing).toBeDefined();
-    expect(card.pricing!.model).toBe("per_call");
+    expect(card.pricing!.model).toBe("per-request");
     expect(card.pricing!.currency).toBe("USDC");
-    expect(card.pricing!.rates.per_call).toBeCloseTo(0.05);
+    expect(card.pricing!.rates.default).toBeCloseTo(0.05);
     expect(card.pricing!.payment_methods).toContain("x402");
   });
 
@@ -127,7 +127,7 @@ describe("buildEntityCard", () => {
       keypair: kp,
     });
     expect(card.entity_url).toBe("https://agent.example.com");
-    expect(card.endpoints.invoke).toBe("https://agent.example.com/invoke");
+    expect(card.endpoints.invoke).toBe("https://agent.example.com/webhook/sync");
   });
 
   it("strips /webhook suffix even with trailing slashes", () => {

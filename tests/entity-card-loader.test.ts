@@ -220,10 +220,10 @@ describe("computeCardHash", () => {
       status: "active" as const,
       capabilities: [{ name: "search", category: "data" }],
       endpoints: {
-        invoke: "https://example.com/invoke",
-        invoke_async: "https://example.com/invoke/async",
+        invoke: "https://example.com/webhook/sync",
+        invoke_async: "https://example.com/webhook",
         health: "https://example.com/health",
-        agent_card: "https://example.com/.well-known/agent-card.json",
+        agent_card: "https://example.com/.well-known/agent.json",
       },
       last_heartbeat: "2024-01-01T00:00:00.000Z",
       signed_at: "2024-01-01T00:00:00.000Z",
@@ -368,9 +368,9 @@ describe("buildRuntimeCard", () => {
     const kp = generateKeypair();
     const card = buildRuntimeCard({ name: "Agent" }, "https://agent.example.com", kp);
 
-    expect(card.endpoints.invoke).toBe("https://agent.example.com/invoke");
+    expect(card.endpoints.invoke).toBe("https://agent.example.com/webhook/sync");
     expect(card.endpoints.health).toBe("https://agent.example.com/health");
-    expect(card.endpoints.agent_card).toBe("https://agent.example.com/.well-known/agent-card.json");
+    expect(card.endpoints.agent_card).toBe("https://agent.example.com/.well-known/agent.json");
   });
 
   it("adds a valid ed25519 signature", () => {
@@ -389,7 +389,7 @@ describe("buildRuntimeCard", () => {
     const kp = generateKeypair();
     const card = buildRuntimeCard({ name: "Agent" }, "https://example.com///", kp);
     expect(card.entity_url).toBe("https://example.com");
-    expect(card.endpoints.invoke).toBe("https://example.com/invoke");
+    expect(card.endpoints.invoke).toBe("https://example.com/webhook/sync");
   });
 
   it("includes timestamps for last_heartbeat and signed_at", () => {

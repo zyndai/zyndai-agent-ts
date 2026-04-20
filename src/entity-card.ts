@@ -4,10 +4,10 @@ import { EntityCard, EntityCardPricing, EntityEndpoints } from "./types";
 export function buildEndpoints(baseUrl: string): EntityEndpoints {
   const base = baseUrl.replace(/\/+$/, "");
   return {
-    invoke: `${base}/invoke`,
-    invoke_async: `${base}/invoke/async`,
+    invoke: `${base}/webhook/sync`,
+    invoke_async: `${base}/webhook`,
     health: `${base}/health`,
-    agent_card: `${base}/.well-known/agent-card.json`,
+    agent_card: `${base}/.well-known/agent.json`,
   };
 }
 
@@ -40,12 +40,11 @@ interface BuildEntityCardOpts {
 }
 
 function parsePricing(price: string): EntityCardPricing {
-  // Strip leading currency symbols ($, €, etc.) then parse the numeric value.
   const numeric = parseFloat(price.replace(/^[^0-9.]+/, ""));
   return {
-    model: "per_call",
+    model: "per-request",
     currency: "USDC",
-    rates: { per_call: isNaN(numeric) ? 0 : numeric },
+    rates: { default: isNaN(numeric) ? 0 : numeric },
     payment_methods: ["x402"],
   };
 }
@@ -90,7 +89,7 @@ export function buildEntityCard(opts: BuildEntityCardOpts): EntityCard {
     public_key: keypair.publicKeyString,
     entity_url: baseUrl,
     version,
-    status: "active",
+    status: "online",
     capabilities: flattenCapabilities(capabilities),
     endpoints: buildEndpoints(baseUrl),
     last_heartbeat: now,
