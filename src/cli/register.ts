@@ -11,7 +11,7 @@ import {
   type Ed25519Keypair,
 } from "../identity.js";
 import { registerEntity } from "../registry.js";
-import { loadDerivationMetadata } from "../entity-card-loader.js";
+import { loadDerivationMetadata, loadEntityCard } from "../entity-card-loader.js";
 import { getRegistryUrl, agentsDir, developerKeyPath, ensureZyndDir } from "./config.js";
 
 function nextAgentIndex(): number {
@@ -46,92 +46,175 @@ export function registerRegisterCommand(program: Command): void {
   program
     .command("register")
     .description("Register an entity on the ZyndAI registry")
-    .requiredOption("--name <name>", "Entity name")
-    .requiredOption("--agent-url <url>", "Public URL for the entity")
+    .option("--name <name>", "Entity name")
+    .option("--agent-url <url>", "Public URL for the entity")
     .option("--category <category>", "Category", "general")
     .option("--tags <tags>", "Comma-separated tags", commaSplit)
     .option("--summary <text>", "Short description")
     .option("--keypair <path>", "Path to keypair JSON file")
+    .option("--card <path>", "Path to entity card JSON file")
     .option("--index <n>", "Derive from developer key at this index", parseInt)
     .option("--type <type>", "Entity type (agent|service)")
     .option("--json", "Output as JSON")
     .action(async (opts: {
-      name: string;
-      agentUrl: string;
+      name?: string;
+      agentUrl?: string;
       category: string;
       tags?: string[];
       summary?: string;
       keypair?: string;
+      card?: string;
       index?: number;
       type?: string;
       json?: boolean;
     }) => {
       ensureZyndDir();
       const registryUrl = getRegistryUrl(program.opts().registry as string | undefined);
-      const devPath = developerKeyPath();
-
-      let keypair: Ed25519Keypair;
-      let developerId: string | undefined;
-      let developerProof: Record<string, unknown> | undefined;
 
       try {
-        if (opts.keypair) {
-          // Explicit keypair — check for derivation metadata to attach developer proof
-          keypair = loadKeypair(opts.keypair);
-          const derivation = loadDerivationMetadata(opts.keypair);
-          if (derivation && fs.existsSync(devPath)) {
-            const devKp = loadKeypair(devPath);
-            const idx = (derivation as Record<string, unknown>).entity_index as number ??
-                        (derivation as Record<string, unknown>).index as number ?? 0;
-            const proof = createDerivationProof(devKp, keypair.publicKeyBytes, idx);
-            developerId = generateDeveloperId(devKp.publicKeyBytes);
-            developerProof = proof;
-          }
-        } else if (opts.index !== undefined && !isNaN(opts.index)) {
-          // Explicit index — derive from developer key
-          if (!fs.existsSync(devPath)) {
-            console.error(chalk.red("Error: No developer keypair found. Run 'zynd init' first."));
+        if (opts.card) {
+          await registerFromCard(opts, registryUrl);
+        } else {
+          if (!opts.name || !opts.agentUrl) {
+            console.error(chalk.red("Error: --name and --agent-url are required when not using --card"));
             process.exitCode = 1;
             return;
           }
-          ({ keypair, developerId, developerProof } = deriveWithProof(devPath, opts.index));
-        } else {
-          // No keypair or index — auto-derive at next available index
-          if (!fs.existsSync(devPath)) {
-            console.error(chalk.red("Error: No developer keypair found. Run 'zynd init' first."));
-            process.exitCode = 1;
-            return;
-          }
-          const index = nextAgentIndex();
-          ({ keypair, developerId, developerProof } = deriveWithProof(devPath, index));
-        }
-
-        const entityId = await registerEntity({
-          registryUrl,
-          keypair,
-          name: opts.name,
-          entityUrl: opts.agentUrl,
-          category: opts.category,
-          tags: opts.tags,
-          summary: opts.summary,
-          developerId,
-          developerProof,
-          entityType: opts.type,
-        });
-
-        if (opts.json) {
-          console.log(JSON.stringify({ entity_id: entityId, public_key: keypair.publicKeyString }));
-        } else {
-          console.log("Agent registered successfully!");
-          console.log(`  Agent ID:   ${entityId}`);
-          console.log(`  Public key: ${keypair.publicKeyString}`);
-          console.log(`  Registry:   ${registryUrl}`);
+          await registerFromFlags(opts as typeof opts & { name: string; agentUrl: string }, registryUrl);
         }
       } catch (err) {
         console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
         process.exitCode = 1;
       }
     });
+}
+
+async function registerFromCard(
+  opts: {
+    card?: string;
+    keypair?: string;
+    agentUrl?: string;
+    type?: string;
+    json?: boolean;
+  },
+  registryUrl: string,
+): Promise<void> {
+  const card = loadEntityCard(opts.card!);
+
+  const keypairPath = opts.keypair ?? process.env["ZYND_AGENT_KEYPAIR_PATH"];
+  if (!keypairPath) {
+    console.error(chalk.red("Error: --keypair or ZYND_AGENT_KEYPAIR_PATH required with --card"));
+    process.exitCode = 1;
+    return;
+  }
+
+  const keypair = loadKeypair(keypairPath);
+  let developerId: string | undefined;
+  let developerProof: Record<string, unknown> | undefined;
+
+  const derivation = loadDerivationMetadata(keypairPath);
+  const devPath = developerKeyPath();
+  if (derivation && fs.existsSync(devPath)) {
+    const devKp = loadKeypair(devPath);
+    const idx = (derivation as Record<string, unknown>).entity_index as number ??
+                (derivation as Record<string, unknown>).index as number ?? 0;
+    developerProof = createDerivationProof(devKp, keypair.publicKeyBytes, idx);
+    developerId = generateDeveloperId(devKp.publicKeyBytes);
+  }
+
+  const entityId = await registerEntity({
+    registryUrl,
+    keypair,
+    name: card.name,
+    entityUrl: opts.agentUrl ?? `http://localhost:5000`,
+    category: card.category ?? "general",
+    tags: card.tags,
+    summary: card.summary,
+    developerId,
+    developerProof,
+    entityType: opts.type,
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify({ entity_id: entityId, public_key: keypair.publicKeyString }));
+  } else {
+    console.log("Entity registered from card successfully!");
+    console.log(`  Entity ID:  ${entityId}`);
+    console.log(`  Name:       ${card.name}`);
+    console.log(`  Public key: ${keypair.publicKeyString}`);
+    console.log(`  Registry:   ${registryUrl}`);
+  }
+}
+
+async function registerFromFlags(
+  opts: {
+    name: string;
+    agentUrl: string;
+    category: string;
+    tags?: string[];
+    summary?: string;
+    keypair?: string;
+    index?: number;
+    type?: string;
+    json?: boolean;
+  },
+  registryUrl: string,
+): Promise<void> {
+  const devPath = developerKeyPath();
+
+  let keypair: Ed25519Keypair;
+  let developerId: string | undefined;
+  let developerProof: Record<string, unknown> | undefined;
+
+  if (opts.keypair) {
+    keypair = loadKeypair(opts.keypair);
+    const derivation = loadDerivationMetadata(opts.keypair);
+    if (derivation && fs.existsSync(devPath)) {
+      const devKp = loadKeypair(devPath);
+      const idx = (derivation as Record<string, unknown>).entity_index as number ??
+                  (derivation as Record<string, unknown>).index as number ?? 0;
+      const proof = createDerivationProof(devKp, keypair.publicKeyBytes, idx);
+      developerId = generateDeveloperId(devKp.publicKeyBytes);
+      developerProof = proof;
+    }
+  } else if (opts.index !== undefined && !isNaN(opts.index)) {
+    if (!fs.existsSync(devPath)) {
+      console.error(chalk.red("Error: No developer keypair found. Run 'zynd init' first."));
+      process.exitCode = 1;
+      return;
+    }
+    ({ keypair, developerId, developerProof } = deriveWithProof(devPath, opts.index));
+  } else {
+    if (!fs.existsSync(devPath)) {
+      console.error(chalk.red("Error: No developer keypair found. Run 'zynd init' first."));
+      process.exitCode = 1;
+      return;
+    }
+    const index = nextAgentIndex();
+    ({ keypair, developerId, developerProof } = deriveWithProof(devPath, index));
+  }
+
+  const entityId = await registerEntity({
+    registryUrl,
+    keypair,
+    name: opts.name,
+    entityUrl: opts.agentUrl,
+    category: opts.category,
+    tags: opts.tags,
+    summary: opts.summary,
+    developerId,
+    developerProof,
+    entityType: opts.type,
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify({ entity_id: entityId, public_key: keypair.publicKeyString }));
+  } else {
+    console.log("Agent registered successfully!");
+    console.log(`  Agent ID:   ${entityId}`);
+    console.log(`  Public key: ${keypair.publicKeyString}`);
+    console.log(`  Registry:   ${registryUrl}`);
+  }
 }
 
 function commaSplit(val: string): string[] {

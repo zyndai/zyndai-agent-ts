@@ -5,7 +5,7 @@ import { AgentMessage } from "./message.js";
 import type { Ed25519Keypair } from "./identity.js";
 import type { AgentSearchResponse } from "./types.js";
 
-export type MessageHandler = (message: AgentMessage) => void | Promise<void>;
+export type MessageHandler = (message: AgentMessage, topic: string | null) => void | Promise<void>;
 
 export interface WebhookOptions {
   entityId: string;
@@ -33,8 +33,10 @@ export class WebhookCommunicationManager {
   private readonly messageHistoryLimit: number;
 
   private readonly handlers: MessageHandler[] = [];
-  // messageId → resolved response string (set by setResponse)
+  // messageId -> resolved response string (set by setResponse)
   private readonly pendingResponses = new Map<string, string>();
+  private readonly receivedMessages: Array<{ message: AgentMessage; receivedAt: number }> = [];
+  private readonly messageHistory: Array<{ message: AgentMessage; receivedAt: number }> = [];
 
   private app: Application;
   private server: Server | null = null;
@@ -71,25 +73,50 @@ export class WebhookCommunicationManager {
     this.handlers.push(fn);
   }
 
+  registerHandler(fn: MessageHandler): void {
+    this.addMessageHandler(fn);
+  }
+
   setResponse(messageId: string, response: string): void {
     this.pendingResponses.set(messageId, response);
   }
 
-  start(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.server = createServer(this.app);
+  async start(): Promise<void> {
+    const MAX_PORT_RETRIES = 10;
 
-      this.server.once("error", (err) => {
-        reject(new Error(`WebhookCommunicationManager: server failed to start: ${err.message}`, { cause: err }));
+    for (let attempt = 0; attempt < MAX_PORT_RETRIES; attempt++) {
+      const port = this.desiredPort + attempt;
+      try {
+        await this.tryListen(port);
+        return;
+      } catch (err) {
+        const isAddrInUse =
+          err instanceof Error &&
+          "code" in (err.cause as Record<string, unknown> ?? {}) &&
+          (err.cause as Record<string, unknown>).code === "EADDRINUSE";
+        if (isAddrInUse && attempt < MAX_PORT_RETRIES - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  private tryListen(port: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const server = createServer(this.app);
+
+      server.once("error", (err: NodeJS.ErrnoException) => {
+        reject(new Error(`WebhookCommunicationManager: server failed to start on port ${port}: ${err.message}`, { cause: err }));
       });
 
-      this.server.listen(this.desiredPort, this.host, () => {
-        const addr = this.server!.address();
-        // addr is AddressInfo when TCP, string when Unix socket — we only use TCP.
+      server.listen(port, this.host, () => {
+        const addr = server.address();
         if (addr === null || typeof addr === "string") {
           reject(new Error("WebhookCommunicationManager: unexpected server address type"));
           return;
         }
+        this.server = server;
         this._port = addr.port;
         this._isRunning = true;
         resolve();
@@ -154,6 +181,43 @@ export class WebhookCommunicationManager {
     return `${agent.entity_url.replace(/\/+$/, "")}/webhook/sync`;
   }
 
+  readMessages(): string {
+    if (!this._isRunning) return "Webhook server not running.";
+    if (this.receivedMessages.length === 0) return "No new messages in the queue.";
+
+    const formatted = this.receivedMessages.map((item) => {
+      const m = item.message;
+      return `From: ${m.senderId}\nType: ${m.messageType}\nContent: ${m.content}`;
+    });
+
+    const output = "Messages received:\n\n" + formatted.join("\n---\n");
+    this.receivedMessages.length = 0;
+    return output;
+  }
+
+  getConnectionStatus(): {
+    entity_id: string;
+    is_running: boolean;
+    webhook_url: string;
+    webhook_port: number;
+    pending_messages: number;
+    message_history_count: number;
+  } {
+    return {
+      entity_id: this.entityId,
+      is_running: this._isRunning,
+      webhook_url: this.webhookUrl,
+      webhook_port: this._port,
+      pending_messages: this.receivedMessages.length,
+      message_history_count: this.messageHistory.length,
+    };
+  }
+
+  getMessageHistory(limit?: number): Array<{ message: AgentMessage; receivedAt: number }> {
+    if (limit === undefined) return [...this.messageHistory];
+    return this.messageHistory.slice(-limit);
+  }
+
   private registerRoutes(): void {
     this.app.get("/health", (_req: Request, res: Response) => {
       res.json({ status: "ok", entity_id: this.entityId, timestamp: new Date().toISOString() });
@@ -176,7 +240,8 @@ export class WebhookCommunicationManager {
       const message = AgentMessage.fromDict(req.body as Record<string, unknown>);
       const messageId = message.messageId || randomUUID();
 
-      // Fire handlers without awaiting — async message delivery.
+      this.storeMessage(message);
+
       void this.fireHandlers(message);
 
       res.json({ status: "received", message_id: messageId });
@@ -191,7 +256,8 @@ export class WebhookCommunicationManager {
       const message = AgentMessage.fromDict(req.body as Record<string, unknown>);
       const messageId = message.messageId;
 
-      // Fire handlers synchronously so they can call setResponse before polling starts.
+      this.storeMessage(message);
+
       await this.fireHandlers(message);
 
       const response = await this.pollForResponse(messageId);
@@ -206,13 +272,20 @@ export class WebhookCommunicationManager {
     });
   }
 
+  private storeMessage(message: AgentMessage): void {
+    const entry = { message, receivedAt: Date.now() / 1000 };
+    this.receivedMessages.push(entry);
+    this.messageHistory.push(entry);
+    if (this.messageHistory.length > this.messageHistoryLimit) {
+      this.messageHistory.splice(0, this.messageHistory.length - this.messageHistoryLimit);
+    }
+  }
+
   private async fireHandlers(message: AgentMessage): Promise<void> {
     for (const handler of this.handlers) {
       try {
-        await handler(message);
+        await handler(message, null);
       } catch (err) {
-        // Log but don't propagate — a failing handler must not crash the server or
-        // block other handlers. Callers should instrument their handlers separately.
         console.error(`WebhookCommunicationManager: handler threw for message ${message.messageId}:`, err);
       }
     }

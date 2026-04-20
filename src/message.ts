@@ -4,6 +4,7 @@ export interface AgentMessageInit {
   content: string;
   senderId: string;
   senderPublicKey?: string;
+  senderDid?: Record<string, unknown>;
   receiverId?: string;
   messageType?: string;
   messageId?: string;
@@ -16,6 +17,7 @@ export class AgentMessage {
   readonly content: string;
   readonly senderId: string;
   readonly senderPublicKey?: string;
+  readonly senderDid?: Record<string, unknown>;
   readonly receiverId?: string;
   readonly messageType: string;
   readonly messageId: string;
@@ -28,6 +30,7 @@ export class AgentMessage {
     this.content = init.content;
     this.senderId = init.senderId;
     this.senderPublicKey = init.senderPublicKey;
+    this.senderDid = init.senderDid;
     this.receiverId = init.receiverId;
     this.messageType = init.messageType ?? "query";
     this.messageId = init.messageId ?? randomUUID();
@@ -42,6 +45,7 @@ export class AgentMessage {
       content: this.content,
       prompt: this.content,
       sender_id: this.senderId,
+      sender_did: this.senderDid ?? null,
       sender_public_key: this.senderPublicKey ?? null,
       receiver_id: this.receiverId ?? null,
       message_type: this.messageType,
@@ -59,9 +63,10 @@ export class AgentMessage {
 
   static fromDict(data: Record<string, unknown>): AgentMessage {
     return new AgentMessage({
-      content: (data.prompt as string) ?? (data.content as string) ?? "",
+      content: (data.content as string) ?? (data.prompt as string) ?? "",
       senderId: (data.sender_id as string) ?? "unknown",
       senderPublicKey: data.sender_public_key as string | undefined,
+      senderDid: (data.sender_did as Record<string, unknown>) ?? undefined,
       receiverId: data.receiver_id as string | undefined,
       messageType: (data.message_type as string) ?? "query",
       messageId: data.message_id as string | undefined,

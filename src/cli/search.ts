@@ -13,8 +13,16 @@ export function registerSearchCommand(program: Command): void {
     .option("--tags <tags>", "Comma-separated tags", commaSplit)
     .option("--skills <skills>", "Comma-separated skills", commaSplit)
     .option("--type <type>", "Entity type (agent|service)")
+    .option("--protocols <protocols>", "Comma-separated protocols", commaSplit)
+    .option("--languages <languages>", "Comma-separated languages", commaSplit)
+    .option("--models <models>", "Comma-separated models", commaSplit)
+    .option("--min-trust <score>", "Minimum trust score", parseFloat)
     .option("--status <status>", "Filter by status")
     .option("--max-results <n>", "Max results", parseInt)
+    .option("--offset <n>", "Result offset", parseInt)
+    .option("--developer <id>", "Filter by developer ID")
+    .option("--developer-handle <handle>", "Filter by developer handle")
+    .option("--fqan <fqan>", "Fully qualified agent name")
     .option("--federated", "Federated cross-registry search")
     .option("--enrich", "Include full agent cards in results")
     .option("--json", "Output raw JSON")
@@ -23,9 +31,17 @@ export function registerSearchCommand(program: Command): void {
       category?: string;
       tags?: string[];
       skills?: string[];
+      protocols?: string[];
+      languages?: string[];
+      models?: string[];
+      minTrust?: number;
       type?: string;
       status?: string;
       maxResults?: number;
+      offset?: number;
+      developer?: string;
+      developerHandle?: string;
+      fqan?: string;
       federated?: boolean;
       enrich?: boolean;
       json?: boolean;
@@ -37,9 +53,17 @@ export function registerSearchCommand(program: Command): void {
       if (opts.category) query.category = opts.category;
       if (opts.tags) query.tags = opts.tags;
       if (opts.skills) query.skills = opts.skills;
+      if (opts.protocols) query.protocols = opts.protocols;
+      if (opts.languages) query.languages = opts.languages;
+      if (opts.models) query.models = opts.models;
+      if (opts.minTrust !== undefined) query.min_trust_score = opts.minTrust;
       if (opts.type) query.entity_type = opts.type;
       if (opts.status) query.status = opts.status;
       if (opts.maxResults) query.max_results = opts.maxResults;
+      if (opts.offset !== undefined) query.offset = opts.offset;
+      if (opts.developer) query.developer_id = opts.developer;
+      if (opts.developerHandle) query.developer_handle = opts.developerHandle;
+      if (opts.fqan) query.fqan = opts.fqan;
       if (opts.federated) query.federated = true;
       if (opts.enrich) query.enrich = true;
 
