@@ -70,3 +70,5 @@ export { ZyndService } from "./service.js";
 
 export { encryptMessage, decryptMessage } from "./crypto.js";
 export type { EncryptedMessage } from "./crypto.js";
+
+export const VERSION = "0.1.0";
