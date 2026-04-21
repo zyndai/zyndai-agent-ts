@@ -1,5 +1,5 @@
 {
-  "name": "zyndai-agent",
+  "name": "zyndai",
   "version": "0.1.0",
   "description": "Multi-framework AI agent SDK for the Zynd AI Network. Ed25519 Identity, Agent Discovery, HTTP Webhooks, Agent Cards, and x402 Micropayments.",
   "type": "module",
