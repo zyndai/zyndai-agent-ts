@@ -19,7 +19,7 @@
     }
   },
   "bin": {
-    "zynd": "./dist/cli/index.js"
+    "zynd": "./dist/cli/index.cjs"
   },
   "files": ["dist"],
   "scripts": {
